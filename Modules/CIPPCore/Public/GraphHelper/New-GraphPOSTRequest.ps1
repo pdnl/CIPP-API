@@ -34,26 +34,28 @@ function New-GraphPOSTRequest {
             }
         }
 
+        $body = Get-CIPPTextReplacement -TenantFilter $tenantid -Text $body -EscapeForJson
+
         if (!$headers['User-Agent']) {
-            $headers['User-Agent'] = "CIPP/$($global:CippVersion ?? '1.0')"
+            $headers['User-Agent'] = Get-CippUserAgent
         }
 
         if (!$contentType) {
             $contentType = 'application/json; charset=utf-8'
         }
-        #Only do text replacement if no headers are set.
-        if (!$headers) { $body = Get-CIPPTextReplacement -TenantFilter $tenantid -Text $body -EscapeForJson }
 
         $RetryCount = 0
         $RequestSuccessful = $false
+        $RawErrorBody = $null
         do {
             try {
-                Write-Information "$($type.ToUpper()) [ $uri ] | tenant: $tenantid | attempt: $($RetryCount + 1) of $maxRetries"
-                $ReturnedData = (Invoke-RestMethod -Uri $($uri) -Method $TYPE -Body $body -Headers $headers -ContentType $contentType -SkipHttpErrorCheck:$IgnoreErrors -ResponseHeadersVariable responseHeaders)
+                Write-Information "$($type.ToUpper()) [ $uri ] | tenant: $tenantid | user-agent: $($headers['User-Agent']) | attempt: $($RetryCount + 1) of $maxRetries"
+                $ReturnedData = (Invoke-CIPPRestMethod -Uri $($uri) -Method $TYPE -Body $body -Headers $headers -ContentType $contentType -SkipHttpErrorCheck:$IgnoreErrors -ResponseHeadersVariable responseHeaders)
                 $RequestSuccessful = $true
             } catch {
                 $ShouldRetry = $false
                 $WaitTime = 0
+                $RawErrorBody = $_.ErrorDetails.Message
                 $Message = if ($_.ErrorDetails.Message) {
                     Get-NormalizedError -Message $_.ErrorDetails.Message
                 } else {
@@ -134,6 +136,11 @@ function New-GraphPOSTRequest {
         }
 
         if ($RequestSuccessful -eq $false) {
+            if ($RawErrorBody) {
+                $GraphException = [System.Exception]::new($Message)
+                $GraphException.Data['RawErrorBody'] = $RawErrorBody
+                throw $GraphException
+            }
             throw $Message
         }
 
